@@ -3,6 +3,8 @@
  * kimi-purge audit hook — JSONL 审计，1MB 轮转（保留 1 份旧档）。
  * 永不 block：正常 exit 0；写失败也静默退出（hook 失败只产生警告，不影响会话）。
  * 事件：SessionStart / PermissionRequest / PermissionResult / Stop（由 manifest 注册）。
+ * rec.keys 始终记录 payload 顶层字段名，event 未知时附 raw 前 400 字符——
+ * 用于核对宿主真实 hook payload 字段名（历史实测 hookEventName 疑被 inputData 展开覆盖）。
  */
 'use strict';
 const fs = require('fs');
@@ -25,13 +27,15 @@ function main() {
 
   const rec = {
     ts: new Date().toISOString(),
-    event: evt.hookEventName || process.argv[2] || 'unknown',
-    sessionId: evt.sessionId,
+    event: evt.hookEventName || evt.event || evt.name || evt.hook_event || 'unknown',
+    sessionId: evt.sessionId || evt.session_id,
     cwd: evt.cwd,
     tool: evt.toolName || evt.tool_name,
     decision: evt.decision || (evt.hookSpecificOutput && evt.hookSpecificOutput.permissionDecision),
     detail: evt.permission ? JSON.stringify(evt.permission).slice(0, 500) : undefined,
+    keys: Object.keys(evt).join(',').slice(0, 300),
   };
+  if (rec.event === 'unknown') rec.raw = (input || '').slice(0, 400);
 
   try {
     fs.mkdirSync(DIR, { recursive: true });

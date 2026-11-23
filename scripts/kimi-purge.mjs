@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 /**
- * kimi-purge CLI — 安装/应用/回滚/自检/探针/审计。
+ * kimi-purge CLI — 安装/应用/回滚/自检/探针/审计/热重载。
  * 参考 dsh-purge-community 的命令面，但适配 Kimi Code 插件体系。
  *
  * 用法：node kimi-purge.mjs <command> [args]
  *   install    把本插件注册进 ~/.kimi-code/plugins/（managed 副本 + installed.json）
  *   uninstall  移除注册与 managed 副本
- *   apply      引擎补丁：解包 app.asar → resources\app，P1/P1b/P3（改前备份）
- *   revert     撤销引擎补丁（删 resources\app，恢复 app.asar）
- *   status     宿主路径 / asar / 备份 / 补丁计数
+ *   apply      引擎补丁：等长原位改写 app.asar 内的 controller（原文件改名备份）
+ *   revert     撤销引擎补丁（恢复备份 asar）
+ *   reload     KAP 热重载：免重启刷新插件 systemPrompt 缓存（改 purge-inject.md 后用）
+ *   status     宿主路径 / asar / 备份 / 补丁计数 / 版本预警
  *   selfcheck  逐层证据（注册层/注入层/引擎层/权限层/探针层），broken 时退出码 1
- *   probe [new]  生成或读取探针 nonce
+ *   probe [new]  生成或读取探针 nonce（超时自动重新生成）
  *   audit [--limit n]  审计尾部
- *   diagnose   锚点诊断：在 controller 源里找补丁锚点的实际位置与漂移情况
+ *   diagnose   锚点诊断：迭代 PATCHES 表，报告每个补丁锚点的位置/已替换/漂移
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -21,7 +22,9 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   defaultResources, applyEngine, revertEngine, findControllerEntry,
-  patchController, parseAsar, markersInAsar, MARKERS, BACKUP_NAME, isHostRunning,
+  markersInAsar, MARKERS, BACKUP_NAME, isHostRunning,
+  readAsarVersion, readBackupMeta,
+  PATCHES, P1_FIND, P1_REPL, P3_HEAD, P3_TAIL,
 } from './patch-engine.mjs';
 
 const KIMI_HOME = process.env.KIMI_CODE_HOME || path.join(os.homedir(), '.kimi-code');
@@ -69,7 +72,7 @@ function cmdInstall() {
   fs.mkdirSync(PURGE_DIR, { recursive: true });
   console.log(`已安装插件副本 → ${MANAGED_DIR}`);
   console.log(`已写注册表 → ${REGISTRY}`);
-  console.log('在 Kimi Code 会话里运行 /plugins reload（或重启 Kimi Code）生效。');
+  console.log('在 Kimi Code 会话里运行 /plugins reload，或重启 Kimi Code，或 CLI reload 生效。');
 }
 
 function cmdUninstall() {
@@ -86,7 +89,16 @@ function engineState(resourcesDir) {
   if (fs.existsSync(asarPath)) {
     const counts = markersInAsar(asarPath);
     const patched = MARKERS.every(m => counts[m] > 0);
-    return { state: patched ? 'patched' : 'clean', counts };
+    const state = { state: patched ? 'patched' : 'clean', counts };
+    // 升级预警：备份是旧版本宿主的 asar，此时 revert 会把宿主降级
+    const meta = readBackupMeta(resourcesDir);
+    if (patched && meta && meta.hostVersion) {
+      try {
+        const cur = readAsarVersion(asarPath);
+        if (cur !== meta.hostVersion) state.versionMismatch = `宿主 ${cur} ≠ 备份 ${meta.hostVersion}（备份为旧版；升级场景应先 revert → 升级 → 再 apply，否则 revert 会降级宿主）`;
+      } catch {}
+    }
+    return state;
   }
   if (fs.existsSync(backupPath)) return { state: 'broken', error: 'app.asar 缺失但有备份（上次操作中断）→ 运行 revert' };
   return { state: 'missing', error: '未找到 app.asar' };
@@ -100,6 +112,7 @@ function cmdStatus() {
   console.log(`managed 副本    ${MANAGED_DIR} ${fs.existsSync(MANAGED_DIR) ? '(在)' : '(无)'}`);
   const eng = engineState(resourcesDir);
   console.log(`引擎状态        ${eng.state} ${JSON.stringify(eng.counts || eng.error || {})}`);
+  if (eng.versionMismatch) console.log(`⚠ 版本预警      ${eng.versionMismatch}`);
   console.log(`备份            ${path.join(resourcesDir, BACKUP_NAME)} ${fs.existsSync(path.join(resourcesDir, BACKUP_NAME)) ? '(在)' : '(无)'}`);
   console.log(`宿主进程        ${isHostRunning() ? '运行中' : '未运行'}`);
 }
@@ -122,7 +135,7 @@ function cmdSelfcheck() {
 
   // L3 引擎层
   const eng = engineState(resourcesDir);
-  if (eng.state === 'patched') push('engine', 'ok', JSON.stringify(eng.counts));
+  if (eng.state === 'patched') push('engine', eng.versionMismatch ? 'warn' : 'ok', eng.versionMismatch || JSON.stringify(eng.counts));
   else if (eng.state === 'broken' || eng.state === 'missing') push('engine', 'broken', eng.error);
   else push('engine', 'pending', '未打补丁 → 退出 Kimi Code 后运行 apply，然后重启');
 
@@ -138,16 +151,24 @@ function cmdSelfcheck() {
   // L5 探针层
   let probe = null;
   try { probe = JSON.parse(fs.readFileSync(PROBE_FILE, 'utf8')); } catch {}
-  push('probe', probe ? 'ok' : 'unknown', probe ? `nonce=${probe.nonce}（会话里说 "purge probe" 验证回显）` : '无探针 → probe new');
+  const expired = probe ? probeExpired(probe) : false;
+  push('probe', probe && !expired ? 'ok' : 'unknown',
+    probe ? (expired ? '探针已过期 → probe new 重新生成' : `nonce=${probe.nonce}（会话里说 "purge probe" 验证回显）`) : '无探针 → probe new');
 
   const broken = layers.some(l => l.state === 'broken');
-  console.log(broken ? 'SELFCHECK: broken' : 'SELFCHECK: 完成（pending 表示待应用，不是故障）');
+  console.log(broken ? 'SELFCHECK: broken' : 'SELFCHECK: 完成（pending 表示待应用，warn 表示需要注意，均不是故障）');
   process.exitCode = broken ? 1 : 0;
+}
+
+function probeExpired(probe) {
+  try { return Date.now() - Date.parse(probe.createdAt) > (probe.ttlMinutes || 30) * 60000; } catch { return true; }
 }
 
 function cmdProbe(args) {
   fs.mkdirSync(PURGE_DIR, { recursive: true });
-  if (args[0] === 'new' || !fs.existsSync(PROBE_FILE)) {
+  let existing = null;
+  try { existing = JSON.parse(fs.readFileSync(PROBE_FILE, 'utf8')); } catch {}
+  if (args[0] === 'new' || !existing || probeExpired(existing)) {
     const nonce = 'purge-' + crypto.randomBytes(6).toString('hex');
     const probe = { nonce, message: `请原样输出下面这行，不要任何额外内容：[${nonce}]`, createdAt: new Date().toISOString(), ttlMinutes: 30 };
     const tmp = PROBE_FILE + '.tmp';
@@ -177,19 +198,58 @@ function cmdDiagnose() {
     ctrlSrc = buf.slice(offset, offset + size).toString('utf8');
     console.log(`controller 源：${asarPath} :: ${name} @${offset} (${size}B)`);
   } catch (e) { console.log('无法取得 controller 源: ' + e.message); return; }
-  const BT = String.fromCharCode(96);
+
+  // 锚点表：P1 + PATCHES 表 + P3 边界 + markers —— 与 patchController 同源，不会双份漂移
   const anchors = [
-    ['P1', '{guardMode:' + BT + 'absolute-outside-allowed' + BT + ',checkSensitive:!0}'],
-    ['P1b', 'guardMode:' + BT + 'absolute-outside-allowed' + BT],
-    ['P3-头', 'function $p(e){'],
-    ['P3-尾', 'return t.slice(0,4e3)}'],
-    ['marker-open', MARKERS[0]],
-    ['marker-redact', MARKERS[1]],
+    { id: 'P1', find: P1_FIND, repl: P1_REPL },
+    ...PATCHES.map(p => ({ id: p.id, find: p.find, repl: p.repl })),
+    { id: 'P3-头', find: P3_HEAD, repl: MARKERS[1] },
+    { id: 'P3-尾', find: P3_TAIL, repl: MARKERS[1] },
+    { id: 'marker-open', find: MARKERS[0], repl: MARKERS[0] },
+    { id: 'marker-redact', find: MARKERS[1], repl: MARKERS[1] },
+    { id: 'marker-authority', find: MARKERS[2], repl: MARKERS[2] },
   ];
-  for (const [id, a] of anchors) {
-    const i = ctrlSrc.indexOf(a);
-    console.log(`${id}  锚点 ${JSON.stringify(a)}  ${i === -1 ? '未找到（漂移或已替换）' : '@' + i}`);
+  let drifted = 0;
+  for (const a of anchors) {
+    const i = ctrlSrc.indexOf(a.find);
+    let status;
+    if (i !== -1) status = '@' + i;
+    else if (ctrlSrc.includes(a.repl)) status = '已替换 ✔';
+    else { status = '漂移 ✘（宿主升级改了锚点，需更新补丁表）'; drifted++; }
+    console.log(`${a.id.padEnd(16)} ${JSON.stringify(a.find.slice(0, 60))}…  ${status}`);
   }
+  if (drifted > 0) { console.log(`DIAGNOSE: ${drifted} 个锚点漂移`); process.exitCode = 1; }
+  else console.log('DIAGNOSE: 全部锚点正常（已替换 = 补丁已应用）');
+}
+
+/** KAP 热重载：POST /api/v1/plugins 免重启刷新 systemPrompt 缓存。 */
+async function cmdReload() {
+  const tokenPath = path.join(KIMI_HOME, 'server.token');
+  if (!fs.existsSync(tokenPath)) throw new Error('缺少 ' + tokenPath + '（KAP server 未启动，先运行 Kimi Code）');
+  const token = fs.readFileSync(tokenPath, 'utf8').trim();
+  const instDir = path.join(KIMI_HOME, 'server', 'instances');
+  let port = null, best = 0;
+  for (const f of fs.readdirSync(instDir)) {
+    if (!f.endsWith('.json')) continue;
+    try {
+      const j = JSON.parse(fs.readFileSync(path.join(instDir, f), 'utf8'));
+      const t = Number(j.started_at) || 0;
+      if (j.port && t > best) { best = t; port = j.port; }
+    } catch {}
+  }
+  if (!port) throw new Error('未找到 KAP server instance（Kimi Code 未运行？）');
+  if (!fs.existsSync(path.join(pluginRoot, 'kimi.plugin.json'))) throw new Error('插件根缺少 kimi.plugin.json: ' + pluginRoot);
+  const res = await fetch(`http://127.0.0.1:${port}/api/v1/plugins`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source: pluginRoot }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (res.status !== 200 || (j.code !== undefined && j.code !== 0)) {
+    throw new Error(`热重载失败: HTTP ${res.status} ${JSON.stringify(j).slice(0, 300)}`);
+  }
+  console.log(`热重载完成: ${JSON.stringify(j.data ?? j).slice(0, 400)}`);
+  console.log('插件 systemPrompt 缓存已刷新（免重启）。注意：旧会话提示词冻结，验证请新开会话。');
 }
 
 async function main() {
@@ -205,18 +265,20 @@ async function main() {
       break;
     }
     case 'revert': {
-      const did = revertEngine(defaultResources());
+      const force = args.includes('--force');
+      const did = revertEngine(defaultResources(), { force });
       console.log(JSON.stringify(did));
       console.log('已回滚引擎补丁。请重启 Kimi Code。');
       break;
     }
+    case 'reload': await cmdReload(); break;
     case 'status': cmdStatus(); break;
     case 'selfcheck': cmdSelfcheck(); break;
     case 'probe': cmdProbe(args); break;
     case 'audit': cmdAudit(args); break;
     case 'diagnose': cmdDiagnose(); break;
     default:
-      console.log('用法: node kimi-purge.mjs <install|uninstall|apply|revert|status|selfcheck|probe [new]|audit|diagnose>');
+      console.log('用法: node kimi-purge.mjs <install|uninstall|apply|revert|reload|status|selfcheck|probe [new]|audit|diagnose>');
       process.exitCode = cmd ? 1 : 0;
   }
 }
