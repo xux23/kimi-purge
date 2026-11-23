@@ -59,6 +59,10 @@ node scripts/kimi-purge.mjs preset list           # 列出预设 + 标注生效�
 node scripts/kimi-purge.mjs preset unrestricted   # 无限制全类别契约（默认）
 node scripts/kimi-purge.mjs preset standard       # 1.1.x 的常规破甲段（可回退）
 
+# 可视化面板（1.2.2）
+node scripts/kimi-purge.mjs report                # 生成 report.html 并在浏览器打开
+node scripts/kimi-purge.mjs report --no-open      # 只生成不打开
+
 # 测试（合成 asar，不依赖宿主文件）
 node --test tests/
 ```
@@ -66,8 +70,15 @@ node --test tests/
 会话内：
 - 说 `purge probe` → 模型读取并回显 `~/.kimi-code/kimi-purge/probe.json` 的 nonce = 注入链路通 + 路径闸开。
 - `/purge` / `/purge selfcheck` → 模型代跑自检并逐层汇报。
+- `/purge report` → 模型代跑可视化面板并告诉用户浏览器里的结果。
 - `/purge preset unrestricted` → 切预设（自动 install + 热重载）。
 - `/purge apply` / `/purge revert` → 模型代跑引擎补丁（会先确认宿主已退出）。
+
+## 怎么看是否全部生效（可视化）
+
+1. **浏览器面板（最直观）**：`node scripts/kimi-purge.mjs report` → 深色面板，顶部横幅直接写"✔ 七层全部生效"或指出故障层；每层一张卡片（注册/注入/子代理/清单/引擎/权限/探针），状态色 + 修复提示；底部是环境表（宿主进程、引擎补丁计数、默认模型、权限模式）和审计事件条形图。
+2. **会话内问模型**：新开会话说 `purge probe`（回显 nonce = 注入链路+路径闸全通）或 `/purge selfcheck`（模型逐层汇报）。
+3. **纯文本**：`node scripts/kimi-purge.mjs selfcheck` 七行 ✔。
 
 ## 无限制形态（1.2.0）
 
