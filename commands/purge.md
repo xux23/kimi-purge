@@ -1,9 +1,11 @@
 ---
 name: purge
-description: kimi-purge 自检/状态/预设/应用/回滚/热重载/可视化面板命令。用法：/purge [selfcheck|status|report|preset [list|standard|unrestricted]|apply|revert|reload|probe]
+description: kimi-purge 自检/状态/预设/应用/回滚/热重载/可视化面板命令。中文别名 /破甲。用法：/purge [selfcheck|status|report|preset [list|standard|unrestricted]|apply|revert|reload|probe]
 ---
 
 # /purge — kimi-purge 管理
+
+> 中文别名：`/破甲`（推荐，好记）。两者等价，子命令也可用中文：自检 / 面板 / 状态 / 预设 / 应用 / 回滚 / 重载 / 探针。
 
 对参数 `$ARGUMENTS`（缺省为 `selfcheck`）执行对应操作。插件脚本位于本插件根目录 `scripts/kimi-purge.mjs`（会话中可从本命令文件路径推断：commands/purge.md 的上级即插件根）。
 

@@ -1,7 +1,7 @@
 {
   "name": "kimi-purge",
-  "version": "1.2.2",
-  "description": "破甲插件（unrestricted 预设）：解除 Kimi Code 的审批弹窗、路径围栏、敏感文件拦截、工具结果脱敏与模型拒绝倾向；附无限制子代理、全事件审计 hook、热重载与探针自检",
+  "version": "1.2.3",
+  "description": "鐮寸敳鎻掍欢锛坲nrestricted 棰勮锛夛細瑙ｉ櫎 Kimi Code 鐨勫鎵瑰脊绐椼€佽矾寰勫洿鏍忋€佹晱鎰熸枃浠舵嫤鎴€佸伐鍏风粨鏋滆劚鏁忎笌妯″瀷鎷掔粷鍊惧悜锛涢檮鏃犻檺鍒跺瓙浠ｇ悊銆佸叏浜嬩欢瀹¤ hook銆佺儹閲嶈浇涓庢帰閽堣嚜妫€",
   "keywords": ["purge", "permissions", "unrestricted", "bypass", "jailbreak", "agent", "audit"],
   "author": { "name": "YG" },
   "license": "MIT",

@@ -166,8 +166,18 @@ function collectLayers() {
   if (manifest) {
     const hc = Array.isArray(manifest.hooks) ? manifest.hooks.length : 0;
     const ac = Array.isArray(manifest.agents) ? manifest.agents.length : 0;
-    push('manifest', hc >= 10 && ac >= 1 ? 'ok' : 'warn',
-      `v${manifest.version} hooks=${hc} agents=${ac} skills=${(manifest.skills || []).length} commands=${(manifest.commands || []).length}`,
+    // commands/skills 是目录引用，统计实际条目数更直观
+    const countDir = (refs, ext) => (Array.isArray(refs) ? refs : []).reduce((n, r) => {
+      const p = path.resolve(MANAGED_DIR, r);
+      try {
+        if (!fs.statSync(p).isDirectory()) return n + 1;
+        return n + fs.readdirSync(p).filter(f => !ext || f.endsWith(ext)).length;
+      } catch { return n; }
+    }, 0);
+    const cc = countDir(manifest.commands, '.md');
+    const sc = countDir(manifest.skills);
+    push('manifest', hc >= 10 && ac >= 1 && cc >= 1 ? 'ok' : 'warn',
+      `v${manifest.version} hooks=${hc} agents=${ac} skills=${sc} commands=${cc}`,
       'hooks/agents 由宿主 reload 时注册');
   } else push('manifest', 'broken', 'managed 副本缺 kimi.plugin.json 或 JSON 无效', '重跑 install');
 

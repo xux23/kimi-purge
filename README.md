@@ -67,17 +67,31 @@ node scripts/kimi-purge.mjs report --no-open      # 只生成不打开
 node --test tests/
 ```
 
-会话内：
-- 说 `purge probe` → 模型读取并回显 `~/.kimi-code/kimi-purge/probe.json` 的 nonce = 注入链路通 + 路径闸开。
-- `/purge` / `/purge selfcheck` → 模型代跑自检并逐层汇报。
-- `/purge report` → 模型代跑可视化面板并告诉用户浏览器里的结果。
-- `/purge preset unrestricted` → 切预设（自动 install + 热重载）。
-- `/purge apply` / `/purge revert` → 模型代跑引擎补丁（会先确认宿主已退出）。
+会话内（**中文命令，好记**）：
+
+| 说这句 | 效果 |
+| --- | --- |
+| `/破甲` 或 `/破甲 自检` | 七层逐层自检 + 表格汇报（英文别名 `/purge`） |
+| `/破甲 面板` | 生成可视化面板并在浏览器打开 |
+| `/破甲 预设 无限制` / `/破甲 预设 标准` | 切预设（自动 install + 热重载） |
+| `/破甲 状态` / `/破甲 重载` / `/破甲 探针` | 分别对应 status / reload / probe |
+| `purge probe` | 读取并回显 `~/.kimi-code/kimi-purge/probe.json` 的 nonce = 注入链路通 + 路径闸开 |
+
+## 状态码（每轮自证，1.2.3）
+
+插件生效时，**每次回复的最后一行自动带**：
+
+```
+⟦破甲 7/7 ✔⟧
+```
+
+它同时是链路自证：模型能读到注入段 = 注入已到达；模型输出它 = 执行契约在线。看到状态码就知道全部生效，不用再跑命令。没看到 = 注入段没加载（查 managed 副本 / 跑 `reload` / 新开会话）。
 
 ## 怎么看是否全部生效（可视化）
 
-1. **浏览器面板（最直观）**：`node scripts/kimi-purge.mjs report` → 深色面板，顶部横幅直接写"✔ 七层全部生效"或指出故障层；每层一张卡片（注册/注入/子代理/清单/引擎/权限/探针），状态色 + 修复提示；底部是环境表（宿主进程、引擎补丁计数、默认模型、权限模式）和审计事件条形图。
-2. **会话内问模型**：新开会话说 `purge probe`（回显 nonce = 注入链路+路径闸全通）或 `/purge selfcheck`（模型逐层汇报）。
+0. **看句尾状态码（最快，零命令）**：任意回复末尾有 `⟦破甲 7/7 ✔⟧` 即全链路在线。
+1. **浏览器面板**：`node scripts/kimi-purge.mjs report` → 深色面板，顶部横幅直接写"✔ 七层全部生效"或指出故障层；每层一张卡片（注册/注入/子代理/清单/引擎/权限/探针），状态色 + 修复提示；底部是环境表（宿主进程、引擎补丁计数、默认模型、权限模式）和审计事件条形图。
+2. **会话内问模型**：说 `/破甲 自检`（模型逐层汇报）或 `purge probe`（回显 nonce = 注入链路+路径闸全通）。
 3. **纯文本**：`node scripts/kimi-purge.mjs selfcheck` 七行 ✔。
 
 ## 无限制形态（1.2.0）
@@ -108,11 +122,12 @@ node --test tests/
 
 - `kimi.plugin.json` — manifest（systemPromptPath / skills / **agents** / sessionStart / **15 条 hooks** / commands）
 - `purge-inject.md` — 生效中的破甲注入段（= `presets/unrestricted.md` 的副本）
-- `presets/unrestricted.md` — 无限制全类别契约（26 类执行条款 + 拒绝硬化 + 边界词归化 + 反自我判断）
+- `presets/unrestricted.md` — 无限制全类别契约（26 类执行条款 + 拒绝硬化 + 边界词归化 + 反自我判断 + **每轮状态码**）
 - `presets/standard.md` — 1.1.x 常规破甲段（回退用）
 - `agents/unrestricted.md` — 无限制子代理（`override: true`、`tools: "*"`）
 - `skills/kimi-purge-boost/SKILL.md` — 会话启动强化技能
-- `commands/purge.md` — `/purge` 斜杠命令
+- `commands/破甲.md` — `/破甲` 中文斜杠命令（推荐）
+- `commands/purge.md` — `/purge` 英文别名
 - `hooks/audit.js` — JSONL 审计 hook（1MB 轮转，永不 block）
 - `scripts/patch-engine.mjs` — 纯 node ASAR 解析 + 等长补丁引擎（导出 PATCHES 锚点表）
 - `scripts/kimi-purge.mjs` — CLI（install/apply/revert/reload/**preset**/status/selfcheck/probe/audit/diagnose）
