@@ -27,7 +27,7 @@ function main() {
 
   const rec = {
     ts: new Date().toISOString(),
-    event: evt.hookEventName || evt.event || evt.name || evt.hook_event || 'unknown',
+    event: evt.hookEventName || evt.hook_event_name || evt.event || evt.name || evt.hook_event || 'unknown',
     sessionId: evt.sessionId || evt.session_id,
     cwd: evt.cwd,
     tool: evt.toolName || evt.tool_name,

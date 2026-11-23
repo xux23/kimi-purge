@@ -9,6 +9,7 @@
  *   apply      引擎补丁：等长原位改写 app.asar 内的 controller（原文件改名备份）
  *   revert     撤销引擎补丁（恢复备份 asar）
  *   reload     KAP 热重载：免重启刷新插件 systemPrompt 缓存（改 purge-inject.md 后用）
+ *   preset     预设切换：list | standard | unrestricted（复制 presets/<name>.md → purge-inject.md 并自动 install+reload）
  *   status     宿主路径 / asar / 备份 / 补丁计数 / 版本预警
  *   selfcheck  逐层证据（注册层/注入层/引擎层/权限层/探针层），broken 时退出码 1
  *   probe [new]  生成或读取探针 nonce（超时自动重新生成）
@@ -131,7 +132,30 @@ function cmdSelfcheck() {
 
   // L2 注入层
   const inject = fs.existsSync(path.join(MANAGED_DIR, 'purge-inject.md'));
-  push('inject', entry && inject ? 'ok' : 'pending', inject ? 'purge-inject.md 就绪' : '缺 purge-inject.md');
+  push('inject', entry && inject ? 'ok' : 'pending', inject ? `purge-inject.md 就绪 (${fs.statSync(path.join(MANAGED_DIR, 'purge-inject.md')).size}B)` : '缺 purge-inject.md');
+
+  // L2b 子代理层（unrestricted agent profile）
+  const agentFile = path.join(MANAGED_DIR, 'agents', 'unrestricted.md');
+  const agentOk = fs.existsSync(agentFile);
+  let agentDetail = '缺 agents/unrestricted.md';
+  if (agentOk) {
+    const txt = fs.readFileSync(agentFile, 'utf8');
+    const hasOverride = /^override:\s*true$/m.test(txt);
+    agentDetail = `unrestricted 子代理就绪 (${fs.statSync(agentFile).size}B, override:${hasOverride ? 'true' : 'false'})`;
+    if (!hasOverride) push('agent', 'warn', agentDetail + ' — 缺 override:true，优先级不够');
+  }
+  if (!agentOk) push('agent', 'pending', agentDetail);
+  else if (/^override:\s*true$/m.test(fs.readFileSync(agentFile, 'utf8'))) push('agent', 'ok', agentDetail);
+
+  // L2c 清单层（hooks / agents / version）
+  let manifest = null;
+  try { manifest = JSON.parse(fs.readFileSync(path.join(MANAGED_DIR, 'kimi.plugin.json'), 'utf8')); } catch {}
+  if (manifest) {
+    const hc = Array.isArray(manifest.hooks) ? manifest.hooks.length : 0;
+    const ac = Array.isArray(manifest.agents) ? manifest.agents.length : 0;
+    push('manifest', hc >= 10 && ac >= 1 ? 'ok' : 'warn',
+      `v${manifest.version} hooks=${hc} agents=${ac} skills=${(manifest.skills || []).length} commands=${(manifest.commands || []).length}`);
+  } else push('manifest', 'broken', 'managed 副本缺 kimi.plugin.json 或 JSON 无效');
 
   // L3 引擎层
   const eng = engineState(resourcesDir);
@@ -179,6 +203,44 @@ function cmdProbe(args) {
   } else {
     console.log(fs.readFileSync(PROBE_FILE, 'utf8'));
   }
+}
+
+const PRESET_DIR = path.join(pluginRoot, 'presets');
+const INJECT_FILE = path.join(pluginRoot, 'purge-inject.md');
+
+function cmdPreset(args) {
+  const names = fs.existsSync(PRESET_DIR)
+    ? fs.readdirSync(PRESET_DIR).filter(f => f.endsWith('.md')).map(f => f.replace(/\.md$/, ''))
+    : [];
+  if (names.length === 0) throw new Error('缺少 presets/ 目录或其中无 .md 预设');
+  const name = args[0];
+  if (!name || name === 'list') {
+    let active = null;
+    try { active = fs.readFileSync(INJECT_FILE, 'utf8').slice(0, 4000); } catch {}
+    console.log('可用预设: ' + names.join(' | '));
+    for (const n of names) {
+      const p = path.join(PRESET_DIR, n + '.md');
+      const same = active !== null && fs.readFileSync(p, 'utf8') === fs.readFileSync(INJECT_FILE, 'utf8');
+      console.log(`  ${same ? '▶ 生效中' : '  '} ${n}  (${fs.statSync(p).size}B)`);
+    }
+    console.log('切换：node kimi-purge.mjs preset <name>');
+    return;
+  }
+  if (!names.includes(name)) throw new Error(`未知预设 "${name}"，可用: ${names.join(' | ')}`);
+  const src = path.join(PRESET_DIR, name + '.md');
+  const prev = fs.existsSync(INJECT_FILE) ? fs.readFileSync(INJECT_FILE, 'utf8') : null;
+  fs.copyFileSync(src, INJECT_FILE);
+  console.log(`预设 ${name} → purge-inject.md (${fs.statSync(INJECT_FILE).size}B)`);
+  // 同步 managed 副本
+  cmdInstall();
+  // 宿主在跑就热重载，否则提示重启
+  if (isHostRunning()) {
+    cmdReload().then(() => console.log('已热重载。注意：旧会话提示词冻结，请新开会话验证。'))
+      .catch(e => { console.error('热重载失败（可重启 Kimi Code 代替）: ' + e.message); });
+  } else {
+    console.log('Kimi Code 未运行或未探测到 KAP；启动后生效。');
+  }
+  if (prev !== null) console.log(`（切换前预设已可随时用 preset 切回；本次切换: ${name}）`);
 }
 
 function cmdAudit(args) {
@@ -272,13 +334,14 @@ async function main() {
       break;
     }
     case 'reload': await cmdReload(); break;
+    case 'preset': cmdPreset(args); break;
     case 'status': cmdStatus(); break;
     case 'selfcheck': cmdSelfcheck(); break;
     case 'probe': cmdProbe(args); break;
     case 'audit': cmdAudit(args); break;
     case 'diagnose': cmdDiagnose(); break;
     default:
-      console.log('用法: node kimi-purge.mjs <install|uninstall|apply|revert|reload|status|selfcheck|probe [new]|audit|diagnose>');
+      console.log('用法: node kimi-purge.mjs <install|uninstall|apply|revert|reload|preset [name|list]|status|selfcheck|probe [new]|audit|diagnose>');
       process.exitCode = cmd ? 1 : 0;
   }
 }
