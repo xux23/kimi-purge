@@ -1,7 +1,7 @@
 /**
  * kimi-purge patch-engine 测试（node --test）。
  * 用合成 asar + 合成 controller 源覆盖全部补丁锚点，不依赖真实宿主文件：
- *   1. patchController 全命中 + 字节等长 + ok 校验
+ *   1. patchController 全命中 + 字节等长 + ok 校验（含 P10a–d 第二套脱敏失活、P12a–c 死代码清理）
  *   2. patchController 幂等（二次运行全 count=0）
  *   3. parseAsar / findControllerEntry 对合成 asar 的定位
  *   4. applyEngine 全流程（tmp 目录）：补丁落盘、字节数不变、meta 写入、二次 apply already、revert 哈希一致
@@ -71,6 +71,10 @@ test('patchController：全命中 + 字节等长 + ok', () => {
   assert.equal(byId['P3'], 1);
   for (const p of PATCHES) if (p.id !== 'P1b') assert.equal(byId[p.id], 1, p.id);
   assert.ok(!patched.includes('absolute-outside-allowed'));
+  assert.ok(!patched.includes('[base64-like'), 'base64-like 截断分支已失活');
+  assert.ok(!patched.includes('PATH_OUTSIDE_WORKSPACE'), 'PATH_OUTSIDE_WORKSPACE 已清理');
+  assert.ok(!patched.includes('PATH_SENSITIVE'), 'PATH_SENSITIVE 已清理');
+  assert.ok(patched.includes('kimi-purge-dead'), 'P12 marker 就位');
   for (const m of MARKERS) assert.ok(patched.includes(m), 'marker ' + m);
 });
 

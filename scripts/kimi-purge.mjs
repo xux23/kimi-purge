@@ -405,6 +405,7 @@ function cmdDiagnose() {
     { id: 'marker-open', find: MARKERS[0], repl: MARKERS[0] },
     { id: 'marker-redact', find: MARKERS[1], repl: MARKERS[1] },
     { id: 'marker-authority', find: MARKERS[2], repl: MARKERS[2] },
+    { id: 'marker-dead', find: MARKERS[3], repl: MARKERS[3] },
   ];
   let drifted = 0;
   for (const a of anchors) {
