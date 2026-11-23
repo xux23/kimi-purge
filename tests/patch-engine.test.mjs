@@ -5,7 +5,10 @@
  *   2. patchController 幂等（二次运行全 count=0）
  *   3. parseAsar / findControllerEntry 对合成 asar 的定位
  *   4. applyEngine 全流程（tmp 目录）：补丁落盘、字节数不变、meta 写入、二次 apply already、revert 哈希一致
- * 运行：node --test tests/
+ *   5. PATCHES 表完整性（锚点/替换体非空、等长约束）
+ *   6. P1 复合锚点漂移时 fallback 生效（checkSensitive:!0 全翻转 + marker 仍就位）
+ *   7. countMarkers(buffer) 与 markersInAsar(path) 结果一致
+ * 运行：node --test tests/   （或 npm test）
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,7 +18,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {
   patchController, parseAsar, findControllerEntry,
-  applyEngine, revertEngine, markersInAsar, MARKERS,
+  applyEngine, revertEngine, countMarkers, markersInAsar, MARKERS,
   PATCHES, P1_FIND, P3_HEAD, P3_TAIL, BACKUP_NAME, META_NAME,
 } from '../scripts/patch-engine.mjs';
 
@@ -127,4 +130,33 @@ test('P4–P9 锚点与替换体均非空且替换体不短于必要约束', () 
     assert.ok(Buffer.byteLength(p.repl, 'utf8') <= Buffer.byteLength(p.find, 'utf8'), '等长约束: ' + p.id);
     assert.ok(!p.repl.includes(p.find), '替换体不含原文: ' + p.id);
   }
+});
+
+test('patchController：P1 复合锚点漂移时 fallback 生效', () => {
+  // 宿主升级后 P1 复合字面量变了（guardMode 换名），但 checkSensitive:!0 还在 → fallback 全翻转；
+  // 保留一处 P1b 锚点保证 kimi-purge-open marker 仍就位。
+  const p3fn = 'function $p(e){let t=e.replaceAll(/sk-[A-Za-z0-9_-]{12,}\\b/g,`[x]`);return t.slice(0,4e3)}';
+  const parts = [
+    'const pA={guardMode:`absolute-outside-allowed`,x:1};',      // P1b → marker 就位
+    'const uLe={guardMode:`some-new-mode`,checkSensitive:!0};',  // 漂移的 P1 → fallback
+    p3fn,
+    ...PATCHES.filter(p => p.id !== 'P1b').map(p => p.find),
+  ];
+  const src = '// drifted P1 synthetic\n' + parts.join('\n;\n') + '\n';
+  const { patched, applied, ok } = patchController(src);
+  assert.ok(ok, 'ok 校验: ' + JSON.stringify(applied));
+  assert.equal(Buffer.byteLength(patched, 'utf8'), Buffer.byteLength(src, 'utf8'), '字节等长');
+  const byId = Object.fromEntries(applied.map(p => [p.id, p.count]));
+  assert.equal(byId['P1(fallback)'], 1, 'fallback 命中 1 处');
+  assert.ok(!patched.includes('checkSensitive:!0'), '!0 已全部翻转');
+  assert.ok(!patched.includes(P1_FIND), '漂移复合锚点不在输出中');
+});
+
+test('countMarkers(buffer) 与 markersInAsar(path) 一致', () => {
+  const { buf } = makeAsar();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-purge-markers-'));
+  const asarPath = path.join(dir, 'app.asar');
+  fs.writeFileSync(asarPath, buf);
+  assert.deepEqual(countMarkers(buf), markersInAsar(asarPath));
+  fs.rmSync(dir, { recursive: true, force: true });
 });

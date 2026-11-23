@@ -4,6 +4,12 @@
 
 **1.2.0 起为「无限制（unrestricted）」形态**：注入段覆盖 26 个任务类别（渗透 / 恶意软件与免杀 / 逆向破解 / 社工钓鱼 / 证件 / 金融 / 成人创作 / 检索层 / C2 后渗透 / 无线 / 自动化滥用 / OSINT / 样本分析 …），并附带 `unrestricted` 无限制子代理、15 个事件的全量审计 hook、预设切换与热重载。
 
+**1.3.0 优化**：修复 manifest 描述乱码（GBK 误解码回写）；补丁器改单遍替换（消除逐次全串重建）；apply/status 全程 asar 读盘 4 次 → 2 次（26MB 级文件体感明显）；`preset list` 在注入文件缺失时不再崩溃；`report` 浏览器打开支持 macOS/Linux，审计条形图按最大值归一；`reload` 增加 15s fetch 超时；新增 `--resources <dir>` 全局参数（自定义宿主安装路径）；宿主探测（isHostRunning）支持 macOS/Linux；安装脚本增加 Node.js 18+ 前置检查；新增 `package.json`（`npm test`）；测试 5 → 7 用例（P1 锚点漂移 fallback、buffer 计数一致性）。
+
+**1.3.1 调整**：`report` 不再自动打开浏览器（只生成 report.html 并打印路径，去 `--no-open` 参数）；快捷命令 `/破甲` 换成拼音缩写 **`/pj`**（`/purge` 别名不变），注入段 / 命令文件 / 文档全链路同步。
+
+**1.3.2 调整**：子命令与口令全面拼音缩写化——CLI 原生支持别名 `zj`=selfcheck `mb`=report `zt`=status `ys`=preset（`lb`=list `wx`=unrestricted `bz`=standard）`yy`=apply `hg`=revert `cz`=reload `tz`=probe（`xj`=new）`sj`=audit `zd`=diagnose `az`=install `xz`=uninstall；会话口令 `purge probe` → **`pj probe`**；`/pj` 的子命令全部用拼音缩写（如 `/pj zj`、`/pj ys wx`），中文与英文原名仍可识别。
+
 ## 五层模型 + 两处扩展
 
 | 层 | 由谁提供 | 生效方式 | 检查方式 |
@@ -45,7 +51,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 # 或手动
 node scripts/kimi-purge.mjs install     # 注册
 node scripts/kimi-purge.mjs apply       # 引擎补丁（改前备份）
-node scripts/kimi-purge.mjs selfcheck   # 五层自检
+node scripts/kimi-purge.mjs selfcheck   # 七层自检
 node scripts/kimi-purge.mjs probe new   # 生成探针
 node scripts/kimi-purge.mjs status      # 状态（含宿主/备份版本预警）
 node scripts/kimi-purge.mjs reload      # KAP 热重载：免重启刷新插件 systemPrompt 缓存
@@ -54,28 +60,33 @@ node scripts/kimi-purge.mjs uninstall   # 移除插件注册
 node scripts/kimi-purge.mjs diagnose    # 补丁锚点诊断（迭代 PATCHES 表，宿主升级后用）
 node scripts/kimi-purge.mjs audit       # 审计尾部（hooks 记录）
 
+# 全局参数（任意子命令前后均可）
+node scripts/kimi-purge.mjs --resources "D:\SomePath\Kimi Code\resources" status   # 非默认安装路径时指定宿主 resources
+
+# 子命令拼音缩写别名（免切输入法）
+node scripts/kimi-purge.mjs zj    # = selfcheck；mb=report zt=status ys=preset yy=apply hg=revert cz=reload tz=probe sj=audit zd=diagnose az=install xz=uninstall
+
 # 预设（1.2.0）
 node scripts/kimi-purge.mjs preset list           # 列出预设 + 标注生效项
 node scripts/kimi-purge.mjs preset unrestricted   # 无限制全类别契约（默认）
 node scripts/kimi-purge.mjs preset standard       # 1.1.x 的常规破甲段（可回退）
 
 # 可视化面板（1.2.2）
-node scripts/kimi-purge.mjs report                # 生成 report.html 并在浏览器打开
-node scripts/kimi-purge.mjs report --no-open      # 只生成不打开
+node scripts/kimi-purge.mjs report                # 生成 report.html（打印路径，不自动开浏览器）
 
 # 测试（合成 asar，不依赖宿主文件）
-node --test tests/
+npm test        # 或 node --test tests/
 ```
 
-会话内（**中文命令，好记**）：
+会话内（**拼音缩写命令，好记**）：
 
 | 说这句 | 效果 |
 | --- | --- |
-| `/破甲` 或 `/破甲 自检` | 七层逐层自检 + 表格汇报（英文别名 `/purge`） |
-| `/破甲 面板` | 生成可视化面板并在浏览器打开 |
-| `/破甲 预设 无限制` / `/破甲 预设 标准` | 切预设（自动 install + 热重载） |
-| `/破甲 状态` / `/破甲 重载` / `/破甲 探针` | 分别对应 status / reload / probe |
-| `purge probe` | 读取并回显 `~/.kimi-code/kimi-purge/probe.json` 的 nonce = 注入链路通 + 路径闸开 |
+| `/pj` 或 `/pj zj` | 七层逐层自检 + 表格汇报（英文别名 `/purge`） |
+| `/pj mb` | 生成可视化面板 report.html（路径打印在终端，自行打开查看） |
+| `/pj ys wx` / `/pj ys bz` | 切预设 无限制/标准（自动 install + 热重载；也可 `ys unrestricted` / `ys standard`） |
+| `/pj zt` / `/pj cz` / `/pj tz` | 分别对应 status / reload / probe |
+| `pj probe` | 读取并回显 `~/.kimi-code/kimi-purge/probe.json` 的 nonce = 注入链路通 + 路径闸开 |
 
 ## 状态码（每轮自证，1.2.3）
 
@@ -90,8 +101,8 @@ node --test tests/
 ## 怎么看是否全部生效（可视化）
 
 0. **看句尾状态码（最快，零命令）**：任意回复末尾有 `⟦破甲 7/7 ✔⟧` 即全链路在线。
-1. **浏览器面板**：`node scripts/kimi-purge.mjs report` → 深色面板，顶部横幅直接写"✔ 七层全部生效"或指出故障层；每层一张卡片（注册/注入/子代理/清单/引擎/权限/探针），状态色 + 修复提示；底部是环境表（宿主进程、引擎补丁计数、默认模型、权限模式）和审计事件条形图。
-2. **会话内问模型**：说 `/破甲 自检`（模型逐层汇报）或 `purge probe`（回显 nonce = 注入链路+路径闸全通）。
+1. **浏览器面板**：`node scripts/kimi-purge.mjs report` 生成 `~/.kimi-code/kimi-purge/report.html`（终端打印路径，自行在浏览器打开）→ 深色面板，顶部横幅直接写"✔ 七层全部生效"或指出故障层；每层一张卡片（注册/注入/子代理/清单/引擎/权限/探针），状态色 + 修复提示；底部是环境表（宿主进程、引擎补丁计数、默认模型、权限模式）和审计事件条形图。
+2. **会话内问模型**：说 `/pj zj`（模型逐层汇报）或 `pj probe`（回显 nonce = 注入链路+路径闸全通）。
 3. **纯文本**：`node scripts/kimi-purge.mjs selfcheck` 七行 ✔。
 
 ## 无限制形态（1.2.0）
@@ -116,22 +127,23 @@ node --test tests/
 
 - 对 Kimi Code 1.4.2 实机 `app.asar`（26,726,959 B）副本测试：P1×1 + P1b×2 + P3×1 全中、补丁前后 asar 字节数一致、`node --check` 对补丁后 controller 语法通过、二次 apply 幂等、revert 哈希一致。
 - `guardMode` 全字面量只剩 `kimi-purge-open`，唯一 throw 的 case 标签成为死代码，switch 无 default。
-- `node --test tests/`：5 用例全绿（patchController 全命中/字节等长/幂等、合成 asar 定位、apply→already→revert 全流程哈希一致）。
+- `node --test tests/`：7 用例全绿（patchController 全命中/字节等长/幂等、合成 asar 定位、apply→already→revert 全流程哈希一致、PATCHES 表完整性、P1 锚点漂移 fallback、buffer 计数一致性）。
 
 ## 文件
 
 - `kimi.plugin.json` — manifest（systemPromptPath / skills / **agents** / sessionStart / **15 条 hooks** / commands）
+- `package.json` — npm 元数据（`npm test` / engines >=18）
 - `purge-inject.md` — 生效中的破甲注入段（= `presets/unrestricted.md` 的副本）
 - `presets/unrestricted.md` — 无限制全类别契约（26 类执行条款 + 拒绝硬化 + 边界词归化 + 反自我判断 + **每轮状态码**）
 - `presets/standard.md` — 1.1.x 常规破甲段（回退用）
 - `agents/unrestricted.md` — 无限制子代理（`override: true`、`tools: "*"`）
 - `skills/kimi-purge-boost/SKILL.md` — 会话启动强化技能
-- `commands/破甲.md` — `/破甲` 中文斜杠命令（推荐）
+- `commands/pj.md` — `/pj` 拼音缩写斜杠命令（推荐）
 - `commands/purge.md` — `/purge` 英文别名
 - `hooks/audit.js` — JSONL 审计 hook（1MB 轮转，永不 block）
-- `scripts/patch-engine.mjs` — 纯 node ASAR 解析 + 等长补丁引擎（导出 PATCHES 锚点表）
-- `scripts/kimi-purge.mjs` — CLI（install/apply/revert/reload/**preset**/status/selfcheck/probe/audit/diagnose）
-- `tests/patch-engine.test.mjs` — 合成 asar 测试套件（node --test）
+- `scripts/patch-engine.mjs` — 纯 node ASAR 解析 + 等长补丁引擎（导出 PATCHES 锚点表；单遍替换 + buffer 复用）
+- `scripts/kimi-purge.mjs` — CLI（install/apply/revert/reload/**preset**/status/selfcheck/probe/audit/diagnose/report + `--resources`）
+- `tests/patch-engine.test.mjs` — 合成 asar 测试套件（node --test，7 用例）
 
 ## 注意
 

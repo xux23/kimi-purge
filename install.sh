@@ -2,6 +2,7 @@
 # kimi-purge 一键安装（macOS/Linux）
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+command -v node >/dev/null 2>&1 || { echo '未找到 node —— kimi-purge 需要 Node.js 18+（内置 fetch）。请先安装：https://nodejs.org/' >&2; exit 1; }
 echo '== kimi-purge 安装 =='
 node "$ROOT/scripts/kimi-purge.mjs" install
 echo ''

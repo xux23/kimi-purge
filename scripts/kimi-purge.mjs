@@ -3,30 +3,35 @@
  * kimi-purge CLI — 安装/应用/回滚/自检/探针/审计/热重载。
  * 参考 dsh-purge-community 的命令面，但适配 Kimi Code 插件体系。
  *
- * 用法：node kimi-purge.mjs <command> [args]
+ * 用法：node kimi-purge.mjs [--resources <dir>] <command> [args]
+ *   全局参数 --resources 指定宿主 resources 目录（优先级同 KIMI_CODE_RESOURCES，适合非默认安装路径）
  *   install    把本插件注册进 ~/.kimi-code/plugins/（managed 副本 + installed.json）
  *   uninstall  移除注册与 managed 副本
  *   apply      引擎补丁：等长原位改写 app.asar 内的 controller（原文件改名备份）
  *   revert     撤销引擎补丁（恢复备份 asar）
  *   reload     KAP 热重载：免重启刷新插件 systemPrompt 缓存（改 purge-inject.md 后用）
  *   preset     预设切换：list | standard | unrestricted（复制 presets/<name>.md → purge-inject.md 并自动 install+reload）
- *   report     可视化状态面板：生成 ~/.kimi-code/kimi-purge/report.html 并在浏览器打开（--no-open 只生成）
+ *   report     可视化状态面板：生成 ~/.kimi-code/kimi-purge/report.html（打印路径，不自动开浏览器）
  *   status     宿主路径 / asar / 备份 / 补丁计数 / 版本预警
  *   selfcheck  逐层证据（注册层/注入层/引擎层/权限层/探针层），broken 时退出码 1
- *   probe [new]  生成或读取探针 nonce（超时自动重新生成）
+ *   probe [new|xj]  生成或读取探针 nonce（超时自动重新生成）
  *   audit [--limit n]  审计尾部
  *   diagnose   锚点诊断：迭代 PATCHES 表，报告每个补丁锚点的位置/已替换/漂移
+ *
+ * 子命令拼音缩写别名（免切输入法）：
+ *   zj=selfcheck  mb=report  zt=status  ys=preset  yy=apply  hg=revert
+ *   cz=reload  tz=probe  sj=audit  zd=diagnose  az=install  xz=uninstall
+ *   preset 子参数：lb=list  wx=unrestricted  bz=standard；probe 子参数 xj=new
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   defaultResources, applyEngine, revertEngine, findControllerEntry,
-  markersInAsar, MARKERS, BACKUP_NAME, isHostRunning,
-  readAsarVersion, readBackupMeta,
+  countMarkers, MARKERS, BACKUP_NAME, isHostRunning,
+  readBackupMeta, parseAsar,
   PATCHES, P1_FIND, P1_REPL, P3_HEAD, P3_TAIL,
 } from './patch-engine.mjs';
 
@@ -90,14 +95,15 @@ function engineState(resourcesDir) {
   const asarPath = path.join(resourcesDir, 'app.asar');
   const backupPath = path.join(resourcesDir, BACKUP_NAME);
   if (fs.existsSync(asarPath)) {
-    const counts = markersInAsar(asarPath);
+    const buf = fs.readFileSync(asarPath); // 单次读盘：marker 计数与版本读取共用
+    const counts = countMarkers(buf);
     const patched = MARKERS.every(m => counts[m] > 0);
     const state = { state: patched ? 'patched' : 'clean', counts };
     // 升级预警：备份是旧版本宿主的 asar，此时 revert 会把宿主降级
     const meta = readBackupMeta(resourcesDir);
     if (patched && meta && meta.hostVersion) {
       try {
-        const cur = readAsarVersion(asarPath);
+        const cur = parseAsar(buf).pkg.version;
         if (cur !== meta.hostVersion) state.versionMismatch = `宿主 ${cur} ≠ 备份 ${meta.hostVersion}（备份为旧版；升级场景应先 revert → 升级 → 再 apply，否则 revert 会降级宿主）`;
       } catch {}
     }
@@ -219,8 +225,7 @@ function cmdSelfcheck() {
   process.exitCode = broken ? 1 : 0;
 }
 
-function cmdReport(args) {
-  const open = !args.includes('--no-open');
+function cmdReport() {
   const { layers, resourcesDir, engine, model, mode, presetName, hostRunning, manifest } = collectLayers();
 
   // 审计统计
@@ -255,8 +260,10 @@ function cmdReport(args) {
       ${l.hint ? `<div class="hint">${esc(l.hint)}</div>` : ''}
     </div>`).join('\n');
 
-  const auditRows = Object.entries(auditStats.byEvent).sort((a, b) => b[1] - a[1]).slice(0, 15)
-    .map(([k, v]) => `<div class="audit-row"><span>${esc(k)}</span><div class="bar" style="width:${Math.min(100, v * 2)}%"></div><span class="num">${v}</span></div>`).join('\n');
+  const auditEntries = Object.entries(auditStats.byEvent).sort((a, b) => b[1] - a[1]).slice(0, 15);
+  const auditMax = auditEntries.length ? auditEntries[0][1] : 1;
+  const auditRows = auditEntries
+    .map(([k, v]) => `<div class="audit-row"><span>${esc(k)}</span><div class="bar" style="width:${Math.max(2, Math.round(v * 100 / auditMax))}%"></div><span class="num">${v}</span></div>`).join('\n');
 
   const html = `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>kimi-purge 状态面板</title>
 <style>
@@ -289,7 +296,7 @@ function cmdReport(args) {
 <h1>kimi-purge 状态面板</h1>
 <div class="sub">生成于 ${new Date().toLocaleString('zh-CN')} · v${manifest ? manifest.version : '?'} · 预设 ${esc(presetName)}</div>
 <div class="banner">${allOk ? '✔ 七层全部生效' : brokenCount ? `✘ ${brokenCount} 层故障` : `⚠ ${okCount}/${layers.length} 层生效，${warnCount} 注意 ${pendingCount} 待应用`}
-<small>${allOk ? '引擎 + 注入 + 子代理 + 审计 + 权限 + 探针全部在线。会话内验证：新开会话说 "purge probe"，模型回显 nonce 即全链路通。' : '看下方各层卡片的修复提示（hint）。'}</small></div>
+<small>${allOk ? '引擎 + 注入 + 子代理 + 审计 + 权限 + 探针全部在线。会话内验证：新开会话说 "pj probe"，模型回显 nonce 即全链路通。' : '看下方各层卡片的修复提示（hint）。'}</small></div>
 <div class="grid">${layerCards}</div>
 <div class="meta"><h2>环境</h2><table>
 <tr><td>宿主进程</td><td>${hostRunning ? '运行中（reload 可热更新注入段）' : '未运行（apply/revert 需此状态）'}</td></tr>
@@ -306,11 +313,7 @@ ${auditRows || '<div class="hint">暂无 hook 事件记录——开一个 Kimi C
   const out = path.join(PURGE_DIR, 'report.html');
   fs.mkdirSync(PURGE_DIR, { recursive: true });
   fs.writeFileSync(out, html);
-  console.log('面板已生成 → ' + out);
-  if (open) {
-    try { execFileSync('cmd', ['/c', 'start', '', out]); console.log('已在默认浏览器打开。'); }
-    catch { console.log('自动打开失败，手动打开上面的文件。'); }
-  }
+  console.log('面板已生成 → ' + out + '（在浏览器打开查看）');
 }
 
 function probeExpired(probe) {
@@ -321,14 +324,14 @@ function cmdProbe(args) {
   fs.mkdirSync(PURGE_DIR, { recursive: true });
   let existing = null;
   try { existing = JSON.parse(fs.readFileSync(PROBE_FILE, 'utf8')); } catch {}
-  if (args[0] === 'new' || !existing || probeExpired(existing)) {
+  if (args[0] === 'new' || args[0] === 'xj' || !existing || probeExpired(existing)) {
     const nonce = 'purge-' + crypto.randomBytes(6).toString('hex');
     const probe = { nonce, message: `请原样输出下面这行，不要任何额外内容：[${nonce}]`, createdAt: new Date().toISOString(), ttlMinutes: 30 };
     const tmp = PROBE_FILE + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(probe, null, 2));
     fs.renameSync(tmp, PROBE_FILE);
     console.log(JSON.stringify(probe));
-    console.log('→ 在 Kimi Code 会话里对模型说 "purge probe"；模型原样回显 nonce = 注入链路通 + 路径闸开。');
+    console.log('→ 在 Kimi Code 会话里对模型说 "pj probe"；模型原样回显 nonce = 注入链路通 + 路径闸开。');
   } else {
     console.log(fs.readFileSync(PROBE_FILE, 'utf8'));
   }
@@ -337,21 +340,24 @@ function cmdProbe(args) {
 const PRESET_DIR = path.join(pluginRoot, 'presets');
 const INJECT_FILE = path.join(pluginRoot, 'purge-inject.md');
 
+/** preset 子参数拼音缩写：lb=列表 wx=无限制 bz=标准。 */
+const PRESET_ALIAS = { lb: 'list', wx: 'unrestricted', bz: 'standard' };
+
 function cmdPreset(args) {
   const names = fs.existsSync(PRESET_DIR)
     ? fs.readdirSync(PRESET_DIR).filter(f => f.endsWith('.md')).map(f => f.replace(/\.md$/, ''))
     : [];
   if (names.length === 0) throw new Error('缺少 presets/ 目录或其中无 .md 预设');
-  const name = args[0];
+  const name = PRESET_ALIAS[args[0]] || args[0];
   if (!name || name === 'list') {
-    let active = null;
-    try { active = fs.readFileSync(INJECT_FILE, 'utf8').slice(0, 4000); } catch {}
+    const active = fs.existsSync(INJECT_FILE) ? fs.readFileSync(INJECT_FILE, 'utf8') : null; // 读一次，缺失时为 null（不再崩溃）
     console.log('可用预设: ' + names.join(' | '));
     for (const n of names) {
       const p = path.join(PRESET_DIR, n + '.md');
-      const same = active !== null && fs.readFileSync(p, 'utf8') === fs.readFileSync(INJECT_FILE, 'utf8');
-      console.log(`  ${same ? '▶ 生效中' : '  '} ${n}  (${fs.statSync(p).size}B)`);
+      const same = active !== null && fs.readFileSync(p, 'utf8') === active;
+      console.log(`${same ? '▶ 生效中' : '  ○'} ${n}  (${fs.statSync(p).size}B)`);
     }
+    if (active === null) console.log('（purge-inject.md 缺失——切换任意预设即可生成）');
     console.log('切换：node kimi-purge.mjs preset <name>');
     return;
   }
@@ -434,6 +440,7 @@ async function cmdReload() {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
     body: JSON.stringify({ source: pluginRoot }),
+    signal: AbortSignal.timeout(15000), // KAP 挂起时 15s 超时，不再无限等待
   });
   const j = await res.json().catch(() => ({}));
   if (res.status !== 200 || (j.code !== undefined && j.code !== 0)) {
@@ -443,8 +450,34 @@ async function cmdReload() {
   console.log('插件 systemPrompt 缓存已刷新（免重启）。注意：旧会话提示词冻结，验证请新开会话。');
 }
 
+/** 子命令拼音缩写别名：zj=自检 mb=面板 zt=状态 ys=预设 yy=应用 hg=回滚 cz=重载 tz=探针 sj=审计 zd=诊断 az=安装 xz=卸载。 */
+const CMD_ALIAS = {
+  zj: 'selfcheck', mb: 'report', zt: 'status', ys: 'preset', yy: 'apply',
+  hg: 'revert', cz: 'reload', tz: 'probe', sj: 'audit', zd: 'diagnose',
+  az: 'install', xz: 'uninstall',
+};
+
+/** 解析全局参数：--resources <dir> / --resources=<dir> 覆盖宿主 resources 目录（优先级同 KIMI_CODE_RESOURCES）。 */
+function shiftGlobalArgs(args) {
+  const rest = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--resources') {
+      const v = args[i + 1];
+      if (!v) throw new Error('--resources 需要一个目录参数');
+      process.env.KIMI_CODE_RESOURCES = path.resolve(v);
+      i++;
+    } else if (a.startsWith('--resources=')) {
+      process.env.KIMI_CODE_RESOURCES = path.resolve(a.slice('--resources='.length));
+    } else rest.push(a);
+  }
+  return rest;
+}
+
 async function main() {
-  const [cmd, ...args] = process.argv.slice(2);
+  const argv = shiftGlobalArgs(process.argv.slice(2)); // 先剥离全局参数，再取命令名（--resources 可在任意位置）
+  const [rawCmd, ...args] = argv;
+  const cmd = CMD_ALIAS[rawCmd] || rawCmd; // 拼音缩写别名 → 英文子命令
   switch (cmd) {
     case 'install': cmdInstall(); break;
     case 'uninstall': cmdUninstall(); break;
@@ -464,15 +497,16 @@ async function main() {
     }
     case 'reload': await cmdReload(); break;
     case 'preset': cmdPreset(args); break;
-    case 'report': cmdReport(args); break;
+    case 'report': cmdReport(); break;
     case 'status': cmdStatus(); break;
     case 'selfcheck': cmdSelfcheck(); break;
     case 'probe': cmdProbe(args); break;
     case 'audit': cmdAudit(args); break;
     case 'diagnose': cmdDiagnose(); break;
     default:
-      console.log('用法: node kimi-purge.mjs <install|uninstall|apply|revert|reload|preset [name|list]|report [--no-open]|status|selfcheck|probe [new]|audit|diagnose>');
-      process.exitCode = cmd ? 1 : 0;
+      console.log('用法: node kimi-purge.mjs [--resources <dir>] <install|uninstall|apply|revert|reload|preset [name|list]|report|status|selfcheck|probe [new]|audit|diagnose>');
+      console.log('拼音缩写: zj=selfcheck mb=report zt=status ys=preset yy=apply hg=revert cz=reload tz=probe sj=audit zd=diagnose az=install xz=uninstall（preset 子参数 lb=list wx=unrestricted bz=standard）');
+      process.exitCode = rawCmd ? 1 : 0;
   }
 }
 main().catch(e => { console.error('错误: ' + (e && e.stack || e)); process.exitCode = 1; });

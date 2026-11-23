@@ -98,8 +98,11 @@ export function defaultResources() {
     'D:\\RuanJian\\Kimi Code\\resources',
     process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'kimi-code', 'resources') : null,
     process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'Kimi Code', 'resources') : null,
+    process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'Kimi Code', 'resources') : null,
     'C:\\Program Files\\Kimi Code\\resources',
     process.platform === 'darwin' ? '/Applications/Kimi Code.app/Contents/Resources' : null,
+    '/opt/Kimi Code/resources',
+    '/usr/lib/kimi-code/resources',
   ].filter(Boolean);
   for (const c of cands) {
     try { if (fs.existsSync(path.join(c, 'app.asar'))) return c; } catch {}
@@ -126,9 +129,9 @@ export function readAsarVersion(asarPath) {
   return parseAsar(buf).pkg.version;
 }
 
-/** 定位 controller 条目：返回 {name, offset(绝对), size} */
-export function findControllerEntry(buf) {
-  const { header, dataStart } = parseAsar(buf);
+/** 定位 controller 条目：返回 {name, offset(绝对), size}；parsed 可传入已解析结果避免二次解析。 */
+export function findControllerEntry(buf, parsed) {
+  const { header, dataStart } = parsed || parseAsar(buf);
   const out = header.files.out;
   if (!out || !out.files) throw new Error('asar 缺少 out/ 目录');
   for (const [name, e] of Object.entries(out.files)) {
@@ -151,18 +154,21 @@ export function patchController(src) {
   const report = [];
   let out = src;
 
-  /** 等长替换（全量循环）：按 UTF-8 字节数补空格，找不到记 0（幂等），替换体字节超长则报错。 */
+  /** 等长替换（单遍）：先收集全部命中位置，再一次重建整串；按 UTF-8 字节数补空格。 */
   const replEq = (id, find, repl) => {
     const findB = Buffer.byteLength(find, 'utf8');
-    let replB = Buffer.byteLength(repl, 'utf8');
+    const replB = Buffer.byteLength(repl, 'utf8');
     if (replB > findB) throw new Error(id + ' 替换体长于原文，无法等长替换');
     const pad = ' '.repeat(findB - replB); // 空格 1 字节
-    let count = 0, i;
-    while ((i = out.indexOf(find)) !== -1) {
-      out = out.slice(0, i) + repl + pad + out.slice(i + find.length);
-      count++;
+    const hits = [];
+    let from = 0, i;
+    while ((i = out.indexOf(find, from)) !== -1) { hits.push(i); from = i + find.length; }
+    if (hits.length) {
+      let res = '', last = 0;
+      for (const h of hits) { res += out.slice(last, h) + repl + pad; last = h + find.length; }
+      out = res + out.slice(last);
     }
-    report.push({ id, count });
+    report.push({ id, count: hits.length });
   };
 
   // ---- P1：路径闸复合字面量（带漂移兜底）----
@@ -198,9 +204,8 @@ export function patchController(src) {
   return { patched: out, applied: report, ok };
 }
 
-/** 在 app.asar 二进制里数 marker（文件内容原样存储，可直接 indexOf） */
-export function markersInAsar(asarPath) {
-  const buf = fs.readFileSync(asarPath);
+/** 在 buffer 里数 marker（文件内容原样存储，可直接 indexOf）；已读入的 asar 请传 buffer 复用，避免重复读盘。 */
+export function countMarkers(buf) {
   const res = {};
   for (const m of MARKERS) {
     let count = 0, idx = buf.indexOf(m, 0, 'utf8');
@@ -210,11 +215,21 @@ export function markersInAsar(asarPath) {
   return res;
 }
 
+/** 兼容入口：按路径读文件并数 marker。 */
+export function markersInAsar(asarPath) {
+  return countMarkers(fs.readFileSync(asarPath));
+}
+
 export function isHostRunning() {
   try {
-    if (process.platform !== 'win32') return false;
-    const out = execSync('tasklist /FI "IMAGENAME eq Kimi Code.exe" /FO CSV', { encoding: 'utf8' });
-    return out.includes('Kimi Code.exe');
+    if (process.platform === 'win32') {
+      const out = execSync('tasklist /FI "IMAGENAME eq Kimi Code.exe" /FO CSV', { encoding: 'utf8' });
+      return out.includes('Kimi Code.exe');
+    }
+    if (process.platform === 'darwin') {
+      return execSync('pgrep -f "Kimi Code( Helper)?"', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().length > 0;
+    }
+    return execSync('pgrep -f "Kimi Code"', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().length > 0;
   } catch { return false; }
 }
 
@@ -249,11 +264,12 @@ export function applyEngine(resourcesDir, { force = false } = {}) {
   if (!force && isHostRunning()) throw new Error('Kimi Code 正在运行，请先完全退出后再 apply（或 --force）');
 
   const buf = fs.readFileSync(asarPath);
-  const curVersion = parseAsar(buf).pkg.version;
-  const { name, offset, size } = findControllerEntry(buf);
+  const parsed = parseAsar(buf);
+  const curVersion = parsed.pkg.version;
+  const { name, offset, size } = findControllerEntry(buf, parsed);
   const src = buf.slice(offset, offset + size).toString('utf8');
   const { patched, applied, ok } = patchController(src);
-  const counts = markersInAsar(asarPath);
+  const counts = countMarkers(buf); // 复用已读入的 buffer，不二次读盘
   if (!ok) throw new Error('补丁应用不完整: ' + JSON.stringify(applied));
   const anyApplied = applied.some(p => p.count > 0);
   if (!anyApplied && MARKERS.every(m => counts[m] > 0)) {
@@ -278,7 +294,7 @@ export function applyEngine(resourcesDir, { force = false } = {}) {
     const meta = { hostVersion: curVersion, savedAt: new Date().toISOString(), size: fs.statSync(backupPath).size, sha256: sha256file(backupPath) };
     fs.writeFileSync(path.join(resourcesDir, META_NAME), JSON.stringify(meta, null, 2));
   }
-  return { ok: true, controller: name, size, applied, backup: backupPath, hostVersion: curVersion, counts: markersInAsar(asarPath), normalized };
+  return { ok: true, controller: name, size, applied, backup: backupPath, hostVersion: curVersion, counts: countMarkers(vbuf), normalized };
 }
 
 /** revert：恢复备份 asar，清理临时/目录残留。宿主运行中拒绝执行（与 apply 同款守卫）。 */

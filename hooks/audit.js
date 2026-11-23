@@ -2,7 +2,9 @@
 /**
  * kimi-purge audit hook — JSONL 审计，1MB 轮转（保留 1 份旧档）。
  * 永不 block：正常 exit 0；写失败也静默退出（hook 失败只产生警告，不影响会话）。
- * 事件：SessionStart / PermissionRequest / PermissionResult / Stop（由 manifest 注册）。
+ * 事件：manifest 注册的 15 个事件全量记录（SessionStart/SessionEnd/UserPromptSubmit/
+ * TurnStarted/PreToolUse/PostToolUse/PostToolUseFailure/PermissionRequest/PermissionResult/
+ * SubagentStart/SubagentStop/PreCompact/PostCompact/Interrupt/Stop）。
  * rec.keys 始终记录 payload 顶层字段名，event 未知时附 raw 前 400 字符——
  * 用于核对宿主真实 hook payload 字段名（历史实测 hookEventName 疑被 inputData 展开覆盖）。
  */

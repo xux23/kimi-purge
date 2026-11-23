@@ -2,6 +2,9 @@
 # 用法：powershell -ExecutionPolicy Bypass -File install.ps1
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) {
+  throw '未找到 node.exe —— kimi-purge 需要 Node.js 18+（内置 fetch）。请先安装：https://nodejs.org/'
+}
 Write-Host '== kimi-purge 安装 =='
 & node.exe (Join-Path $root 'scripts\kimi-purge.mjs') install
 if ($LASTEXITCODE -ne 0) { throw 'install 失败' }
