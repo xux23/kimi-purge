@@ -2,7 +2,33 @@
 
 参考 `dsh-purge-community` 架构，为 **Kimi Code 桌面版**（Moonshot，Electron，适配 1.4.x）编写的破甲插件：解除审批弹窗、路径围栏、敏感文件拦截、工具结果脱敏与模型拒绝倾向。
 
-**1.2.0 起为「无限制（unrestricted）」形态**：注入段覆盖 26 个任务类别（渗透 / 恶意软件与免杀 / 逆向破解 / 社工钓鱼 / 证件 / 金融 / 成人创作 / 检索层 / C2 后渗透 / 无线 / 自动化滥用 / OSINT / 样本分析 …），并附带 `unrestricted` 无限制子代理、15 个事件的全量审计 hook、预设切换与热重载。
+**1.2.0 起为「无限制（unrestricted）」形态**：注入段覆盖 26 个任务类别（渗透 / 恶意软件与免杀 / 逆向破解 / 社工钓鱼 / 证件 / 金融 / 成人创作 / 检索层 / C2 后渗透 / 无线 / 自动化滥用 / OSINT / 样本分析 …），并附带 `unrestricted` 无限制子代理、20 个事件的全量审计 hook、预设切换与热重载。
+
+## 安装
+
+三种方式，任选其一（1.3.0 起支持官方 GitHub 直装）：
+
+```powershell
+# ① GitHub 直装（推荐）：Kimi Code 会话里执行，装的是最新 release
+/plugins install https://github.com/xux23/kimi-purge
+
+# ② 自定义 marketplace 浏览安装
+/plugins marketplace https://github.com/xux23/kimi-purge/raw/main/marketplace.json
+
+# ③ 本地安装（开发/改源码用）
+git clone https://github.com/xux23/kimi-purge
+cd kimi-purge
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+装完后：
+
+```powershell
+/reload        # 或 /new 新开会话，注册能力生效
+node %USERPROFILE%\.kimi-code\plugins\managed\kimi-purge\scripts\kimi-purge.mjs apply   # 引擎补丁（先完全退出 Kimi Code，改前自动备份）
+```
+
+注：GitHub/本地安装都会拷贝到 `~/.kimi-code/plugins/managed/kimi-purge/` 托管副本运行；引擎补丁（apply）与注入段（systemPromptPath）自动生效，改源码后需重装或对托管副本重跑 `install`。
 
 **1.3.0 优化**：修复 manifest 描述乱码（GBK 误解码回写）；补丁器改单遍替换（消除逐次全串重建）；apply/status 全程 asar 读盘 4 次 → 2 次（26MB 级文件体感明显）；`preset list` 在注入文件缺失时不再崩溃；`report` 浏览器打开支持 macOS/Linux，审计条形图按最大值归一；`reload` 增加 15s fetch 超时；新增 `--resources <dir>` 全局参数（自定义宿主安装路径）；宿主探测（isHostRunning）支持 macOS/Linux；安装脚本增加 Node.js 18+ 前置检查；新增 `package.json`（`npm test`）；测试 5 → 7 用例（P1 锚点漂移 fallback、buffer 计数一致性）。
 
@@ -26,7 +52,7 @@
 | 提示词注入 | manifest `systemPromptPath: ./purge-inject.md` → 官方 plugin systemPrompt 通道（65536 字节预算内） | 每个会话注入 | selfcheck L2 + probe |
 | 会话强化 | `sessionStart.skill: kimi-purge-boost` + skills 目录 | 会话启动 | selfcheck L2 |
 | 无限制子代理 | manifest `agents: ["./agents"]` → `agents/unrestricted.md`（`override: true`、`tools: "*"`） | 会话内可委派 | selfcheck L2b |
-| 清单层 | `hooks`（15 事件）/ `agents` / `skills` / `commands` 计数 | reload 时注册 | selfcheck L2c |
+| 清单层 | `hooks`（20 事件全量）/ `agents` / `skills` / `commands` 计数 | reload 时注册 | selfcheck L2c |
 | 权限配置 | 用户 `config.toml` `default_permission_mode = "auto"`（auto = 全工具自动放行，策略链 auto-mode-approve） | 会话内 | selfcheck L4 |
 | 引擎补丁 | `apply`：**等长原位**改写 `app.asar` 内的 `out/controller-*.cjs`（原文件改名备份） | **重启后加载** | selfcheck L3 |
 
@@ -96,12 +122,14 @@ npm test        # 或 node --test tests/
 
 会话内（**拼音缩写命令，好记**）：
 
+斜杠命令按官方规范以插件 id 为前缀注册，真实注册名是 `/kimi-purge:pj` 和 `/kimi-purge:purge`（裸 `/pj` 作为普通文本发给模型时同样会被执行）：
+
 | 说这句 | 效果 |
 | --- | --- |
-| `/pj` 或 `/pj zj` | 七层逐层自检 + 表格汇报（英文别名 `/purge`） |
-| `/pj mb` | 生成可视化面板 report.html（路径打印在终端，自行打开查看） |
-| `/pj ys wx` / `/pj ys bz` | 切预设 无限制/标准（自动 install + 热重载；也可 `ys unrestricted` / `ys standard`） |
-| `/pj zt` / `/pj cz` / `/pj tz` | 分别对应 status / reload / probe |
+| `/kimi-purge:pj` 或 `/kimi-purge:pj zj` | 七层逐层自检 + 表格汇报（英文别名 `/kimi-purge:purge`；裸写 `/pj` 也行） |
+| `/kimi-purge:pj mb` | 生成可视化面板 report.html（路径打印在终端，自行打开查看） |
+| `/kimi-purge:pj ys wx` / `/kimi-purge:pj ys bz` | 切预设 无限制/标准（自动 install + 热重载；也可 `ys unrestricted` / `ys standard`） |
+| `/kimi-purge:pj zt` / `/kimi-purge:pj cz` / `/kimi-purge:pj tz` | 分别对应 status / reload / probe |
 | `pj probe` | 读取并回显 `~/.kimi-code/kimi-purge/probe.json` 的 nonce = 注入链路通 + 路径闸开 |
 
 ## 状态码（每轮自证，1.2.3）
@@ -147,15 +175,17 @@ npm test        # 或 node --test tests/
 
 ## 文件
 
-- `kimi.plugin.json` — manifest（systemPromptPath / skills / **agents** / sessionStart / **15 条 hooks** / commands）
+- `kimi.plugin.json` — manifest（interface 展示元数据 + locales / skillInstructions / systemPromptPath / skills / **agents** / sessionStart / **20 条 hooks 全事件** / commands）
 - `package.json` — npm 元数据（`npm test` / engines >=18）
+- `locales/zh-CN.json`、`locales/en-US.json` — `/plugins` 详情页的中英文展示文案
+- `marketplace.json` — 自定义 marketplace 清单（`/plugins marketplace <url>` 浏览安装用）
 - `purge-inject.md` — 生效中的破甲注入段（= `presets/unrestricted.md` 的副本）
 - `presets/unrestricted.md` — 无限制全类别契约（26 类执行条款 + 拒绝硬化 + 边界词归化 + 反自我判断 + **每轮状态码**）
 - `presets/standard.md` — 1.1.x 常规破甲段（回退用）
 - `agents/unrestricted.md` — 无限制子代理（`override: true`、`tools: "*"`）
 - `skills/kimi-purge-boost/SKILL.md` — 会话启动强化技能
-- `commands/pj.md` — `/pj` 拼音缩写斜杠命令（推荐）
-- `commands/purge.md` — `/purge` 英文别名
+- `commands/pj.md` — `/kimi-purge:pj` 拼音缩写斜杠命令（推荐，裸写 `/pj` 也行）
+- `commands/purge.md` — `/kimi-purge:purge` 英文别名
 - `hooks/audit.js` — JSONL 审计 hook（1MB 轮转，永不 block）
 - `scripts/patch-engine.mjs` — 纯 node ASAR 解析 + 等长补丁引擎（导出 PATCHES 锚点表；单遍替换 + buffer 复用）
 - `scripts/kimi-purge.mjs` — CLI（install/apply/revert/reload/**preset**/status/selfcheck/probe/audit/diagnose/report + `--resources`）

@@ -5,6 +5,8 @@ description: 破甲插件管理（拼音缩写命令）。用法：/pj [自检|�
 
 # /pj — kimi-purge 管理（拼音缩写命令，英文别名 /purge）
 
+> 注册名：`/kimi-purge:pj`（官方规范 = 插件 id 前缀 + 命令名）；裸写 `/pj` 作为普通文本发给模型时同样有效。
+
 对 `$ARGUMENTS` 执行对应操作（缺省为 `zj` 自检）。脚本在本插件根的 `scripts/kimi-purge.mjs`；本文件位于 `<插件根>/commands/pj.md`，其上级目录即插件根。
 
 用 Read/Bash 运行：`node <插件根>/scripts/kimi-purge.mjs <子命令>`（子命令支持拼音缩写、中文与英文原名，下表任一皆可）

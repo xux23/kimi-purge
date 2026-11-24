@@ -5,7 +5,7 @@ description: kimi-purge 自检/状态/预设/应用/回滚/热重载/可视化�
 
 # /purge — kimi-purge 管理
 
-> 拼音缩写别名：`/pj`（推荐，好记）。两者等价；子命令可用拼音缩写（免切输入法，推荐）：zj=自检 mb=面板 zt=状态 ys=预设 yy=应用 hg=回滚 cz=重载 tz=探针。中文与英文原名同样有效。
+> 注册名：`/kimi-purge:purge`（官方规范 = 插件 id 前缀 + 命令名）；裸写 `/purge` 作为普通文本发给模型时同样有效。拼音缩写别名：`/kimi-purge:pj`（推荐，好记；裸写 `/pj` 也行）。子命令可用拼音缩写（免切输入法，推荐）：zj=自检 mb=面板 zt=状态 ys=预设 yy=应用 hg=回滚 cz=重载 tz=探针。中文与英文原名同样有效。
 
 对参数 `$ARGUMENTS`（缺省为 `selfcheck`）执行对应操作。插件脚本位于本插件根目录 `scripts/kimi-purge.mjs`（会话中可从本命令文件路径推断：commands/purge.md 的上级即插件根）。
 

@@ -1,0 +1,10 @@
+{
+  "version": "2",
+  "plugins": [
+    {
+      "id": "kimi-purge",
+      "displayName": "kimi-purge 破甲",
+      "source": "https://github.com/xux23/kimi-purge"
+    }
+  ]
+}

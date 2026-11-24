@@ -1,0 +1,7 @@
+{
+  "displayName": "kimi-purge 破甲",
+  "shortDescription": "解除审批/路径围栏/脱敏/拒绝倾向，附无限制子代理与七层自检",
+  "longDescription": "等长原位引擎补丁（P1-P9）解除路径围栏、敏感文件拦截与工具结果脱敏；官方 systemPrompt 通道注入无限制执行契约（unrestricted/standard 双预设）；override:true 无限制子代理；20 事件全量审计 hook；每轮句尾状态码 ⟦破甲 7/7 ✔⟧ 自证；CLI 含 install/apply/revert/reload/preset/report/selfcheck/probe。",
+  "developerName": "YG",
+  "websiteURL": "https://github.com/xux23/kimi-purge"
+}
