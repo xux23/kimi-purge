@@ -6,7 +6,7 @@
 
 ## 安装
 
-三种方式，任选其一（1.3.0 起支持官方 GitHub 直装）：
+三种方式，任选其一（1.4.0 起支持官方 GitHub 直装）：
 
 ```powershell
 # ① GitHub 直装（推荐）：Kimi Code 会话里执行，装的是最新 release
